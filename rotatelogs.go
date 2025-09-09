@@ -140,6 +140,27 @@ func (rl *RotateLogs) getWriterNolock(bailOnRotateFail, useGenerationalNames boo
 		if rl.forceNewFile {
 			forceNewFile = true
 		}
+
+		if !forceNewFile && rl.outFh == nil {
+			// this is the first write after calling New(),
+			// write to the latest generational file as possible.
+			if _, err := os.Stat(filename); err == nil {
+				// file exists
+				name := filename
+				for {
+					nextGeneration := generation + 1
+					nextName := fmt.Sprintf("%s.%d", filename, nextGeneration)
+					if _, err := os.Stat(nextName); err != nil {
+						// next file does not exists
+						break
+					}
+					// next file exists
+					generation = nextGeneration
+					name = nextName
+				}
+				filename = name
+			}
+		}
 	} else {
 		if !useGenerationalNames && !sizeRotation {
 			// nothing to do

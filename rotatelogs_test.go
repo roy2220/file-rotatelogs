@@ -15,6 +15,7 @@ import (
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSatisfiesIOWriter(t *testing.T) {
@@ -578,5 +579,131 @@ func TestForceNewFile(t *testing.T) {
 				return
 			}
 		}
+	})
+}
+
+func TestFirstWriteToProperFile(t *testing.T) {
+	newDir := func(t *testing.T) string {
+		dir, err := ioutil.TempDir("", "file-rotatelogs-firstwrite")
+		require.NoError(t, err, `creating temporary directory should succeed`)
+		t.Cleanup(func() { os.RemoveAll(dir) })
+		return dir
+	}
+
+	t.Run("First write to file of generation 0 - file does not exist", func(t *testing.T) {
+		baseFn := filepath.Join(newDir(t), "test.log")
+
+		rl, err := rotatelogs.New(baseFn, rotatelogs.WithRotationSize(1))
+		require.NoError(t, err, "rotatelogs.New should succeed")
+
+		rl.Write([]byte("Hello, World\n"))
+		require.Equal(t, baseFn, rl.CurrentFileName())
+
+		content, err := ioutil.ReadFile(rl.CurrentFileName())
+		require.NoError(t, err, "ioutil.ReadFile should succeed")
+
+		require.Equal(t, "Hello, World\n", string(content), "file content should match")
+
+		rl.Write([]byte("End\n"))
+		require.Equal(t, baseFn+".1", rl.CurrentFileName())
+	})
+
+	t.Run("First write to file of generation 0 - file exists", func(t *testing.T) {
+		baseFn := filepath.Join(newDir(t), "test.log")
+
+		err := ioutil.WriteFile(baseFn, []byte("Line A\n"), os.ModePerm)
+		require.NoError(t, err, "ioutil.WriteFile should succeed")
+
+		rl, err := rotatelogs.New(baseFn, rotatelogs.WithRotationSize(1))
+		require.NoError(t, err, "rotatelogs.New should succeed")
+
+		rl.Write([]byte("Hello, World\n"))
+		require.Equal(t, baseFn, rl.CurrentFileName())
+
+		content, err := ioutil.ReadFile(rl.CurrentFileName())
+		require.NoError(t, err, "ioutil.ReadFile should succeed")
+
+		require.Equal(t, "Line A\nHello, World\n", string(content), "file content should match")
+
+		rl.Write([]byte("End\n"))
+		require.Equal(t, baseFn+".1", rl.CurrentFileName())
+	})
+
+	t.Run("First write to file of generation 1", func(t *testing.T) {
+		baseFn := filepath.Join(newDir(t), "test.log")
+
+		err := ioutil.WriteFile(baseFn, []byte("Line A\n"), os.ModePerm)
+		require.NoError(t, err, "ioutil.WriteFile should succeed")
+
+		err = ioutil.WriteFile(baseFn+".1", []byte("Line B\n"), os.ModePerm)
+		require.NoError(t, err, "ioutil.WriteFile should succeed")
+
+		rl, err := rotatelogs.New(baseFn, rotatelogs.WithRotationSize(1))
+		require.NoError(t, err, "rotatelogs.New should succeed")
+
+		rl.Write([]byte("Hello, World\n"))
+		require.Equal(t, baseFn+".1", rl.CurrentFileName())
+
+		content, err := ioutil.ReadFile(rl.CurrentFileName())
+		require.NoError(t, err, "ioutil.ReadFile should succeed")
+
+		require.Equal(t, "Line B\nHello, World\n", string(content), "file content should match")
+
+		rl.Write([]byte("End\n"))
+		require.Equal(t, baseFn+".2", rl.CurrentFileName())
+	})
+
+	t.Run("First write to file of generation 2", func(t *testing.T) {
+		baseFn := filepath.Join(newDir(t), "test.log")
+
+		err := ioutil.WriteFile(baseFn, []byte("Line A\n"), os.ModePerm)
+		require.NoError(t, err, "ioutil.WriteFile should succeed")
+
+		err = ioutil.WriteFile(baseFn+".1", []byte("Line B\n"), os.ModePerm)
+		require.NoError(t, err, "ioutil.WriteFile should succeed")
+
+		err = ioutil.WriteFile(baseFn+".2", []byte("Line C\n"), os.ModePerm)
+		require.NoError(t, err, "ioutil.WriteFile should succeed")
+
+		rl, err := rotatelogs.New(baseFn, rotatelogs.WithRotationSize(1))
+		require.NoError(t, err, "rotatelogs.New should succeed")
+
+		rl.Write([]byte("Hello, World\n"))
+		require.Equal(t, baseFn+".2", rl.CurrentFileName())
+
+		content, err := ioutil.ReadFile(rl.CurrentFileName())
+		require.NoError(t, err, "ioutil.ReadFile should succeed")
+
+		require.Equal(t, "Line C\nHello, World\n", string(content), "file content should match")
+
+		rl.Write([]byte("End\n"))
+		require.Equal(t, baseFn+".3", rl.CurrentFileName())
+	})
+
+	t.Run("First write to file of generation 3 - force new file", func(t *testing.T) {
+		baseFn := filepath.Join(newDir(t), "test.log")
+
+		err := ioutil.WriteFile(baseFn, []byte("Line A\n"), os.ModePerm)
+		require.NoError(t, err, "ioutil.WriteFile should succeed")
+
+		err = ioutil.WriteFile(baseFn+".1", []byte("Line B\n"), os.ModePerm)
+		require.NoError(t, err, "ioutil.WriteFile should succeed")
+
+		err = ioutil.WriteFile(baseFn+".2", []byte("Line C\n"), os.ModePerm)
+		require.NoError(t, err, "ioutil.WriteFile should succeed")
+
+		rl, err := rotatelogs.New(baseFn, rotatelogs.WithRotationSize(1), rotatelogs.ForceNewFile())
+		require.NoError(t, err, "rotatelogs.New should succeed")
+
+		rl.Write([]byte("Hello, World\n"))
+		require.Equal(t, baseFn+".3", rl.CurrentFileName())
+
+		content, err := ioutil.ReadFile(rl.CurrentFileName())
+		require.NoError(t, err, "ioutil.ReadFile should succeed")
+
+		require.Equal(t, "Hello, World\n", string(content), "file content should match")
+
+		rl.Write([]byte("End\n"))
+		require.Equal(t, baseFn+".4", rl.CurrentFileName())
 	})
 }
